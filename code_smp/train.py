@@ -1,3 +1,4 @@
+import segmentation_models_pytorch as smp
 import torch
 from torchsummary import summary
 
@@ -12,6 +13,7 @@ import torch.optim as optim
 from dataset import WeatherRadarDataset, generate_pairs
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from sklearn.metrics import accuracy_score
 
 
 def datasets():
@@ -36,24 +38,39 @@ def datasets():
     return loader_train, loader_eval
 
 
+def cal_acc(y_true, y_pred):
+    y_true = y_true[:, 0].contiguous().view(-1).detach().cpu().numpy()
+    y_pred = y_pred[:, 0].contiguous().view(-1).detach().cpu().numpy()
+    return accuracy_score(
+        np.floor(y_true / 0.1).astype(np.int), np.floor(y_pred / 0.1).astype(np.int)
+    )
+
+
 def train_epoch(model, loader, optimizer, dsc_loss):
 
     model.train()
     loss_train = []
+    acc_train = []
     pbar = tqdm(loader, total=len(loader))
     # pbar = loader
+    loss_func=torch.nn.BCELoss()
     for idx, data in enumerate(pbar):
         x, y_true = data
-        x, y_true = x.cuda(), y_true.cuda()
+        x, y_true = x.cuda(), y_true[:, :, :, :].cuda()
         optimizer.zero_grad()
 
         y_pred = model(x)
         # print(x.shape,y_pred.shape)
-        loss = dsc_loss(y_pred, y_true)
+        loss = dsc_loss(y_pred, y_true) + loss_func((y_pred > 0).view(-1).float(), (y_true > 0).view(-1).float())
         loss_train.append(loss.item())
+        acc_train.append(cal_acc(y_true, y_pred))
         loss.backward()
         optimizer.step()
-        desc = "%.3f" % (sum(loss_train) / len(loss_train))
+        desc = "loss - %.3f acc - %.3f" % (
+            sum(loss_train) / len(loss_train),
+            sum(acc_train) / len(acc_train),
+        )
+
         pbar.set_description(desc)
         # if idx % 200 == 0:
         # print('%5d-%.3f' % (idx, (sum(loss_train) / len(loss_train))))
@@ -64,26 +81,30 @@ def eval_epoch(model, loader, dsc_loss):
 
     model.eval()
     loss_eval = []
+    acc_eval = []
     pbar = tqdm(loader, total=len(loader))
     # pbar = loader
+    loss_func=torch.nn.BCELoss()
     for idx, data in enumerate(pbar):
         x, y_true = data
-        x, y_true = x.cuda(), y_true.cuda()
+        x, y_true = x.cuda(), y_true[:, :, :, :].cuda()
 
         y_pred = model(x)
-        loss = dsc_loss(y_pred, y_true)
+        # loss = dsc_loss(y_pred, y_true)
+        loss = dsc_loss(y_pred, y_true) + loss_func((y_pred > 0).view(-1).float(), (y_true > 0).view(-1).float())
         loss_eval.append(loss.item())
-        desc = "%.3f" % (sum(loss_eval) / len(loss_eval))
+        acc_eval.append(cal_acc(y_true, y_pred))
+        desc = "loss - %.3f acc - %.3f" % (
+            sum(loss_eval) / len(loss_eval),
+            sum(acc_eval) / len(acc_eval),
+        )
         pbar.set_description(desc)
     return model
 
 
 def main():
 
-    loss = smp.utils.losses.MSELoss()
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    DEVICE = "cuda"
-    metrics = [smp.utils.metrics.IoU()]
+    dsc_loss = smp.utils.losses.MSELoss(reduction="mean")
     # dsc_loss = DiceLoss()
 
     # model = UNet(in_channels=21, out_channels=4, init_features=128)
@@ -96,47 +117,23 @@ def main():
     )
     model.cuda()
     print(summary(model, input_size=(21, 256, 256)))
-    optimizer = optim.Adam(model.parameters(), lr=0.01)
-    optimizer = optim.Adam([dict(params=model.parameters(), lr=0.0001)])
-
-    # optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-    # scheduler = optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.0001, max_lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    # optimizer = optim.SGD(model.parameters(), lr=0.01,momentum=0.9)
+    # scheduler = optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.0001, max_lr=0.01)
     loader_train, loader_eval = datasets()
 
-    save_model_path = "../checkpoints/resnet34-smp.pth"
-    load_model_path = "../checkpoints/resnet34-smp.pth"
+    save_model_path = "../checkpoints/resnet34-all.pk"
+    load_model_path = "../checkpoints/resnet34-all.pk"
     if os.path.exists(load_model_path):
-        print('load model from', load_model_path)
-        model = torch.load(load_model_path)
-        # model.load_state_dict(torch.load(load_model_path))
+        print("restore model from", load_model_path)
+        model.load_state_dict(torch.load(load_model_path))
 
-    train_epoch = smp.utils.train.TrainEpoch(
-        model,
-        loss=loss,
-        metrics=metrics,
-        optimizer=optimizer,
-        device=DEVICE,
-        verbose=True,
-    )
-    valid_epoch = smp.utils.train.ValidEpoch(
-        model, loss=loss, metrics=metrics, device=DEVICE, verbose=True
-    )
-    max_score = 0
-
-    for i in range(0, 400):
-
-        print("\nEpoch: {}".format(i))
-        train_logs = train_epoch.run(loader_train)
-        valid_logs = valid_epoch.run(loader_eval)
-        # do something (save model, change lr, etc.)
-        if max_score < valid_logs['iou_score']:
-            max_score = valid_logs['iou_score']
-            torch.save(model,save_model_path)
-            print('Model saved!')
-                              
-        if i == 25:
-            optimizer.param_groups[0]['lr'] = 1e-5
-            print('Decrease decoder learning rate to 1e-5!')
+    for e in range(1000):
+        model = train_epoch(model, loader_train, optimizer, dsc_loss)
+        model = eval_epoch(model, loader_eval, dsc_loss)
+        # scheduler.step()
+        torch.save(model.state_dict(), save_model_path)
+        print("begin epoch", e, "saving to", save_model_path)  # ,scheduler.get_lr())
 
 
 if __name__ == "__main__":

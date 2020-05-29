@@ -80,6 +80,6 @@ class WeatherRadarDataset(Dataset):
 
 
 if __name__ == "__main__":
-    train_pairs = generate_pairs("../data/huawei/train/")
-    test_pairs = generate_pairs("../data/huawei/test/")
+    train_pairs = generate_pairs("../inputs/train_data01/")
+    test_pairs = generate_pairs("../inputs/test_data/")
     print(test_pairs)
