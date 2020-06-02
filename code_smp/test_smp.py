@@ -1,6 +1,7 @@
-import torch
-import torchvision
-#import segmentation_models_pytorch as smp
+import albumentations as albu
 
-print(torch.__version__)
-print(torchvision.__version__)
+
+def get_training_augmentation():
+    train_transform = [albu.HorizontalFlip(p=1)]
+    return albu.Compose(train_transform)
+

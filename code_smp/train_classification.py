@@ -14,12 +14,15 @@ from dataset_classfication import WeatherRadarDataset, generate_pairs
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score, f1_score
+from augmentation import get_training_augmentation
 
 
 def datasets():
 
-    raw_pairs = generate_pairs("../inputs/train_data01")
-    raw_reverse_pairs = generate_pairs("../inputs/train_data01", True)
+    raw_pairs = generate_pairs("../inputs/train_data01") + \
+            generate_pairs("../inputs/train_data02")
+    raw_reverse_pairs = generate_pairs("../inputs/train_data01", True) + \
+            generate_pairs("../inputs/train_data02", True)
 
     train_pairs = [p for p in raw_pairs if p[0][0].split("/")[-2][7] not in ["7"]] + [
         p for p in raw_reverse_pairs if p[0][0].split("/")[-2][7] not in ["7"]
@@ -27,15 +30,16 @@ def datasets():
     eval_pairs = [p for p in raw_pairs if p[0][0].split("/")[-2][7] in ["7"]]
 
     print("len of train=", len(train_pairs), "len of eval=", len(eval_pairs))
+    # data_train = WeatherRadarDataset(pairs=train_pairs, augmentation=get_training_augmentation())
     data_train = WeatherRadarDataset(pairs=train_pairs)
     data_eval = WeatherRadarDataset(pairs=eval_pairs)
 
     loader_train = DataLoader(
-        data_train, batch_size=4, shuffle=True, drop_last=False, num_workers=4
+        data_train, batch_size=8, shuffle=True, drop_last=False, num_workers=4
     )
 
     loader_eval = DataLoader(
-        data_eval, batch_size=4, shuffle=True, drop_last=False, num_workers=4
+        data_eval, batch_size=8, shuffle=True, drop_last=False, num_workers=4
     )
 
     return loader_train, loader_eval

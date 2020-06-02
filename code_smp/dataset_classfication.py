@@ -40,8 +40,8 @@ class WeatherRadarDataset(Dataset):
     in_channels = 21
     out_channels = 4
 
-    def __init__(self, pairs, transform=None):
-        self.transform = transform
+    def __init__(self, pairs, augmentation=None):
+        self.augmentation= augmentation
         self.pairs = pairs
 
     def __images_to_np(self, image_paths):
@@ -81,11 +81,15 @@ class WeatherRadarDataset(Dataset):
         x_paths, (y30_path, y60_path, y90_path, y120_path) = self.pairs[idx]
 
         x_np = self.__images_to_np(x_paths)
-        image_tensor = torch.from_numpy(x_np)
         if y30_path == y60_path == y90_path == y120_path == "":
+            image_tensor = torch.from_numpy(x_np)
             return image_tensor, torch.from_numpy(np.array([idx]))
         y_np = self.__images_to_label([y30_path, y60_path, y90_path, y120_path])
+        if self.augmentation is not None:
+            sample = self.augmentation(image=x_np, mask=y_np)
+            x_np, y_np = sample['image'], sample['mask']
 
+        image_tensor = torch.from_numpy(x_np)
         mask_tensor = torch.from_numpy(y_np)
 
         return image_tensor, mask_tensor
